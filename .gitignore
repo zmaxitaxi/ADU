@@ -1,0 +1,29 @@
+# Permit datasets, generated results, and review material stay local.
+deliverables/
+reports/
+tmp/
+data/
+*_review.md
+*_validation.md
+*_validation_sample.csv
+*_validation_sample.json
+*.csv
+*.csv.gz
+*.xlsx
+*.xls
+*.pdf
+*.parquet
+
+# Python and local tooling
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.coverage
+htmlcov/
+.DS_Store
+.env
+.env.*
+.agents/
+.codex/
