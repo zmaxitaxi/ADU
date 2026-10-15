@@ -11,10 +11,12 @@ import json
 from contextlib import ExitStack
 from pathlib import Path
 
-from classify_adu import classify_description, open_csv, sha256
+from classify_adu import (ACTION_CATEGORIES, LABEL_FIELDS, action_components,
+                          classify_action, classify_description, open_csv, sha256)
 
 AUDIT_FIELDS = ["source_row", "BUILDINGPERMITID", "DESCRIPTION", "ADU project",
-                "ADU type", "reason", "evidence", "review_flags"]
+                "ADU type", "reason", "evidence", "review_flags", "ADU action",
+                "action_reason", "action_evidence", "action_flags"]
 
 
 class VerificationError(ValueError):
@@ -30,6 +32,7 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
     summary = json.loads(Path(summary_path).read_text(encoding="utf-8"))
     require(isinstance(summary, dict), "Summary must be a JSON object")
     counts, types, flags = collections.Counter(), collections.Counter(), collections.Counter()
+    actions, components, action_flags = collections.Counter(), collections.Counter(), collections.Counter()
     statuses, dates, states = collections.Counter(), collections.Counter(), collections.Counter()
     rows = missing = duplicate_ids = 0
     identifiers = set()
@@ -40,7 +43,7 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
         fields = next(source, None)
         require(fields is not None and "DESCRIPTION" in fields, "Source needs a DESCRIPTION header")
         require(len(fields) == len(set(fields)) and all(name.strip() for name in fields), "Invalid source column names")
-        require(next(output, None) == fields + ["ADU project", "ADU type"], "Column contract failed")
+        require(next(output, None) == fields + LABEL_FIELDS, "Column contract failed")
         audit_reader = None
         if audit_path is not None:
             audit_stream = stack.enter_context(open_csv(audit_path, "r"))
@@ -49,17 +52,24 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
         for number, (before, after) in enumerate(itertools.zip_longest(source, output), 2):
             require(before is not None and after is not None, f"Row count differs at record {number}")
             require(len(before) == len(fields), f"Malformed source record {number}")
-            require(len(after) == len(fields) + 2, f"Malformed output record {number}")
-            require(after[:-2] == before, f"Original cells or order differ at record {number}")
-            project, unit_type = after[-2:]
+            require(len(after) == len(fields) + 3, f"Malformed output record {number}")
+            require(after[:-3] == before, f"Original cells or order differ at record {number}")
+            project, unit_type, action_label = after[-3:]
             require(project in {"Yes", "No"}, f"Invalid project label at record {number}")
             allowed_types = {"Attached", "Detached", "Unclear"} if project == "Yes" else {""}
             require(unit_type in allowed_types, f"Invalid type at record {number}")
+            try:
+                parts = action_components(action_label)
+            except ValueError:
+                raise VerificationError(f"Invalid action at record {number}") from None
+            require(bool(parts) if project == "Yes" else not action_label, f"Invalid action at record {number}")
             record = dict(zip(fields, before))
             result = classify_description(record["DESCRIPTION"]) if reclassify else None
+            action = classify_action(record["DESCRIPTION"], project) if reclassify else None
             if result is not None:
                 require((project, unit_type) == (result.project, result.unit_type),
                         f"Saved labels differ from classifier at record {number}")
+                require(action_label == action.label, f"Saved action differs from classifier at record {number}")
             if audit_reader is not None:
                 audit = next(audit_reader, None)
                 require(audit is not None and len(audit) == len(AUDIT_FIELDS), f"Missing or malformed audit record {number}")
@@ -69,14 +79,23 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
                 audit_flags = audit[7].split("; ") if audit[7] else []
                 require(len(audit_flags) == len(set(audit_flags)), f"Duplicate audit flags at record {number}")
                 flags.update(audit_flags)
+                require(audit[8] == action_label and bool(audit[9].strip()), f"Audit action differs at record {number}")
+                audit_action_flags = audit[11].split("; ") if audit[11] else []
+                require(len(audit_action_flags) == len(set(audit_action_flags)), f"Duplicate action flags at record {number}")
+                action_flags.update(audit_action_flags)
                 if result is not None:
                     expected_detail = [result.reason, "; ".join(result.evidence), "; ".join(result.flags)]
-                    require(audit[5:] == expected_detail, f"Audit evidence differs from classifier at record {number}")
+                    require(audit[5:8] == expected_detail, f"Audit evidence differs from classifier at record {number}")
+                    expected_action = [action.label, action.reason, "; ".join(action.evidence), "; ".join(action.flags)]
+                    require(audit[8:] == expected_action, f"Audit action evidence differs from classifier at record {number}")
             elif result is not None:
                 flags.update(result.flags)
+                action_flags.update(action.flags)
             counts[project] += 1
             if project == "Yes":
                 types[unit_type] += 1
+                actions[action_label] += 1
+                components.update(parts)
             missing += not bool(record["DESCRIPTION"].strip())
             statuses[record.get("STATUS", "")] += 1
             dates[record.get("EFFECTIVEDATE", "")] += 1
@@ -90,8 +109,9 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
             require(next(audit_reader, None) is None, "Extra audit records")
     nonempty_dates = [date for date in dates if date]
     expected = {
-        "rows": rows, "original_columns": len(fields), "output_columns": len(fields) + 2,
+        "rows": rows, "original_columns": len(fields), "output_columns": len(fields) + 3,
         "project_labels": dict(counts), "adu_types": dict(types), "missing_descriptions": missing,
+        "adu_actions": dict(actions), "adu_action_categories": dict(components), "action_categories": list(ACTION_CATEGORIES),
         "duplicate_permit_ids": duplicate_ids, "property_states": dict(states),
         "effective_dates": dict(dates), "statuses": dict(statuses),
         "effective_date_range": [min(nonempty_dates), max(nonempty_dates)] if nonempty_dates else [None, None],
@@ -99,6 +119,7 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
     }
     if audit_path is not None or reclassify:
         expected["review_flags"] = dict(flags)
+        expected["action_review_flags"] = dict(action_flags)
     for name, value in expected.items():
         require(name in summary and summary[name] == value, f"Summary mismatch: {name}")
     return {

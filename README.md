@@ -1,16 +1,17 @@
 # ADU permit classifier
 
 Identify accessory dwelling unit (ADU) projects from building-permit descriptions
-and classify their relationship to the primary dwelling. The Python pipeline
-appends exactly two columns while preserving every original cell, identifier,
+and classify their relationship to the primary dwelling and permit purpose. The Python pipeline
+appends exactly three columns while preserving every original cell, identifier,
 and row position:
 
 | Column | Values |
 | --- | --- |
 | ADU project | Yes or No |
 | ADU type | Attached, Detached, or Unclear for Yes; blank for No |
+| ADU action | Current permit purpose, possibly several actions separated by `; `; blank for No |
 
-Current version: **1.1.0**. Requires **Python 3.9 or later**, standard library
+Current version: **1.2.0**. Requires **Python 3.9 or later**, standard library
 only. Permit text is treated as data and never executed.
 
 ## Quick start
@@ -77,6 +78,35 @@ Detached units, or multiple recognized units with incomplete type evidence.
 JADU alone does not establish Attached. Repeated mentions do not automatically
 mean separate units. Complex descriptions may require human adjudication.
 
+## ADU action
+
+Version 1.2.0 adds purpose classification without changing the prior project/type
+rules. Actions describe this permit's ADU work, rather than every activity in a
+related building project. Categories are New construction, Conversion, Addition,
+Legalization, Repair/remodel, Demolition/removal, Reconstruction, Utility work,
+Site preparation, Administrative, and Unclear. Projects labeled No have blank action.
+
+Several explicitly supported purposes remain in canonical order, for example
+`Conversion; Addition` or `Demolition/removal; Reconstruction`. The summary's
+`adu_actions` counts complete label strings and partitions the Yes permits.
+`adu_action_categories` counts overlapping components and must not be summed
+as though each permit has only one purpose. `action_components()` validates and
+splits labels. The evidence file adds action reason, evidence and review flags.
+
+Standalone trade, site and administrative wrappers control over the underlying
+project described for context. Thus plumbing for a new ADU is Utility work,
+grading or garage demolition for a future ADU is Site preparation, and renewal
+of a conversion permit is Administrative. Bare “new ADU” stays Unclear because
+the unit could arise through new building work or conversion. Missing or
+unresolved action evidence remains Unclear, with review flags. Explicit mixed
+purposes survive, but an unscoped repeated unit mention is flagged for review.
+
+Demolition/removal includes explicit loss of ADU use, such as reverting to a
+garage, and carries an imagery-review flag. It does not by itself establish that
+a building disappears. Legalization can concern a much older unit. Actions do
+not establish approval, completion, net new units or visible image changes.
+See [action definitions, examples and limitations](docs/adu_actions.md).
+
 ## Tests and file verification
 
 ```sh
@@ -91,16 +121,20 @@ python3 run_checks.py --source INPUT.csv.gz \
 
 The runner exits nonzero on failure. It may refresh its generated test report;
 source and delivered data are not rewritten. Full mode without explicit paths
-expects the local September export under `deliverables/v1_1/` and reads its
+expects the local September export under `deliverables/v1_2/` and reads its
 source path from the summary. These files are absent from a fresh clone, so use
 `--unit-only` or supply all data paths.
 
-The 63 test methods cover source-based regressions, negation, scope references,
+The 89 test methods cover source-based regressions, negation, scope references,
 unrelated attachment language, deterministic inputs, Unicode/multiline cells,
 leading zeros, invalid CSV/encoding/gzip, empty inputs, failure cleanup,
 overwrite protection, deliberate output corruption, and validation under
 Python's `-O` option. Sampling/evaluation tests check blinding, reproducibility,
 metric arithmetic, uncertainty exclusions, and invalid reviews.
+Purpose tests also distinguish conversion from equipment work, unrelated
+structure work, partial removal, historical references and administrative scope.
+The validator checks action domains, canonical ordering, applicability, evidence
+and component/label counts in addition to the original output contracts.
 
 Integrity tests establish software and file contracts, not semantic accuracy.
 
@@ -136,6 +170,10 @@ the contextual inference requires adjudication. Earlier reviews informed rules
 and are not an unbiased accuracy benchmark. Obtain human labels before claiming
 production accuracy.
 
+That diagnostic sample evaluates the earlier project/type labels only. It does
+not validate the new action labels. Purpose rules have software regressions and
+AI development review, with no independent human accuracy benchmark yet.
+
 ## Metadata audit and later GIS work
 
 ```sh
@@ -149,11 +187,19 @@ exports and source fields `ATTOMID`, `DESCRIPTION`, `TYPE`, `SUBTYPE`,
 `PROJECTNAME`. Broad metadata categories may mention ADU alongside unrelated
 work; candidates are not confirmed ADUs.
 
-The September source contained 73,587 rows. Version 1.1.0 labels 2,864 Yes and
+The September source contained 73,587 rows. Project/type labels remain 2,864 Yes and
 70,723 No; Yes types are 404 Attached, 924 Detached, and 1,536 Unclear. Full local
 checks preserved 2,869,893 original cells and reproduced CSV/audit content. Two
 passing-reference records changed from the original export. There were 3,912
 blank descriptions and 520 metadata candidates among No labels.
+
+Current version 1.2.0 adds ADU action for all positive permits and blank action
+for No. The local original download became unavailable. We recovered its 39
+original string columns from the unchanged, checksum-verified v1.1 gzip export,
+recorded recovery provenance and compare every prior column/label with v1.2.
+The new export has 42 columns. Historical two-column exports remain available
+locally, and the prior Git commit preserves their code. Use version 1.2 inputs
+and outputs with the updated three-column validator.
 
 The source includes mixed permit stages and effective dates through September 23;
 it does not establish an exclusively approved or complete-month cohort. There

@@ -29,10 +29,10 @@ class PipelineTests(unittest.TestCase):
             result = process(source, output, audit, summary)
             with gzip.open(output, "rt", encoding="utf-8", newline="") as stream:
                 saved = list(csv.reader(stream))
-            self.assertEqual(saved[0], fields + ["ADU project", "ADU type"])
-            self.assertEqual([row[:-2] for row in saved[1:]], rows)
-            self.assertEqual([row[-2:] for row in saved[1:]],
-                             [["Yes", "Detached"], ["No", ""], ["No", ""]])
+            self.assertEqual(saved[0], fields + ["ADU project", "ADU type", "ADU action"])
+            self.assertEqual([row[:-3] for row in saved[1:]], rows)
+            self.assertEqual([row[-3:] for row in saved[1:]],
+                             [["Yes", "Detached", "Unclear"], ["No", "", ""], ["No", "", ""]])
             self.assertEqual(sha256(source), before)
             self.assertEqual(result["rows"], 3)
             self.assertEqual(json.loads(summary.read_text())["missing_descriptions"], 1)

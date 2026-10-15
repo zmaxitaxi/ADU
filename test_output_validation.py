@@ -92,21 +92,58 @@ class OutputValidationTests(unittest.TestCase):
         for project, unit_type in (("yes", "Detached"), (" Yes", "Detached"),
                                    ("Yes", "detached"), ("Yes", "Detached "), ("Yes", "")):
             rows = [row[:] for row in original]
-            rows[1][-2:] = [project, unit_type]
+            rows[1][-3:-1] = [project, unit_type]
             self.write_rows(self.output, rows)
             with self.assertRaisesRegex(VerificationError, "Invalid"):
                 self.check()
 
     def test_no_project_cannot_have_a_type(self):
         rows = self.read_rows(self.output)
-        rows[2][-1] = "Unclear"
+        rows[2][-2] = "Unclear"
         self.write_rows(self.output, rows)
         with self.assertRaisesRegex(VerificationError, "Invalid type"):
             self.check()
 
+    def test_invalid_missing_or_nonapplicable_actions_are_rejected(self):
+        original = self.read_rows(self.output)
+        for index, action in ((1, ""), (1, "Build"), (1, "Conversion; Unclear"),
+                              (1, "Utility work; Conversion"), (2, "Repair/remodel")):
+            with self.subTest(row=index, action=action):
+                rows = [row[:] for row in original]
+                rows[index][-1] = action
+                self.write_rows(self.output, rows)
+                with self.assertRaisesRegex(VerificationError, "Invalid action"):
+                    self.check()
+
+    def test_valid_but_incorrect_action_is_rejected_by_reclassification(self):
+        rows = self.read_rows(self.output)
+        rows[1][-1] = "Conversion"
+        self.write_rows(self.output, rows)
+        with self.assertRaisesRegex(VerificationError, "Saved action differs"):
+            self.check()
+
+    def test_action_evidence_and_flags_are_checked(self):
+        initial = self.read_rows(self.audit)
+        for column in (8, 9, 10, 11):
+            with self.subTest(column=column):
+                rows = [row[:] for row in initial]
+                rows[1][column] = "incorrect"
+                self.write_rows(self.audit, rows)
+                with self.assertRaisesRegex(VerificationError, "Audit action"):
+                    self.check()
+
+    def test_action_summary_counts_are_checked(self):
+        initial = self.summary.read_text()
+        for key in ("adu_actions", "adu_action_categories", "action_categories", "action_review_flags"):
+            with self.subTest(key=key):
+                self.summary.write_text(initial)
+                self.edit_summary(key, "wrong")
+                with self.assertRaisesRegex(VerificationError, "Summary mismatch"):
+                    self.check()
+
     def test_valid_but_incorrect_type_is_rejected_by_reclassification(self):
         rows = self.read_rows(self.output)
-        rows[1][-1] = "Attached"
+        rows[1][-2] = "Attached"
         self.write_rows(self.output, rows)
         with self.assertRaisesRegex(VerificationError, "Saved labels differ"):
             self.check()

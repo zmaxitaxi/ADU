@@ -34,7 +34,7 @@ class InputHandlingTests(unittest.TestCase):
         self.assertEqual(result["rows"], 0)
         self.assertEqual(result["effective_date_range"], [None, None])
         with gzip.open(self.paths[0], "rt", newline="") as stream:
-            self.assertEqual(list(csv.reader(stream)), [["DESCRIPTION", "ADU project", "ADU type"]])
+            self.assertEqual(list(csv.reader(stream)), [["DESCRIPTION", "ADU project", "ADU type", "ADU action"]])
 
     def test_minimum_schema_and_utf8_bom(self):
         self.source.write_text('DESCRIPTION\n"New detached ADU, café"\n', encoding="utf-8-sig")
@@ -45,7 +45,7 @@ class InputHandlingTests(unittest.TestCase):
     def test_invalid_headers_leave_no_outputs(self):
         for text in ("", "OTHER\nHVAC\n", "DESCRIPTION,DESCRIPTION\na,b\n",
                      "DESCRIPTION,\nADU,x\n", "DESCRIPTION,ADU project\nADU,Yes\n",
-                     "DESCRIPTION,ADU type\nADU,Detached\n"):
+                     "DESCRIPTION,ADU type\nADU,Detached\n", "DESCRIPTION,ADU action\nADU,Conversion\n"):
             with self.subTest(header=text.splitlines()[:1]):
                 self.source.write_text(text)
                 with self.assertRaises(ValueError):

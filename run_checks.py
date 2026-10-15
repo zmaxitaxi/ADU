@@ -20,7 +20,7 @@ from classify_adu import VERSION, process
 from verify_output import VerificationError, verify
 
 ROOT = Path(__file__).resolve().parent
-DEFAULT_DATA = ROOT / "deliverables/v1_1"
+DEFAULT_DATA = ROOT / "deliverables/v1_2"
 REPORT_KIND = "adu_test_report"
 
 
