@@ -366,7 +366,7 @@ def train(source, directory, seed=SEED, min_precision=0.98, max_miss_rate=0.02):
     held_type = detached_labels(type_model, held_type_prob, type_thresholds, type_allowed[holdout])
     held_new = np.where(held_new_score >= 0.5, "Yes", "No")
     source_hash = rules.sha256(source)
-    bundle = {"version": MODEL_VERSION, "runtime": RUNTIME, "rules_version": rules.VERSION,
+    bundle = {"version": MODEL_VERSION, "runtime": RUNTIME, "rules_version": rules.DESCRIPTION_RULES_VERSION,
               "source_sha256": source_hash, "features": selected, "vectorizers": fitted,
               "adu_model": adu_model, "adu_thresholds": adu_thresholds,
               "type_model": type_model, "type_thresholds": type_thresholds, "new_model": new_model}
@@ -460,7 +460,8 @@ def score_csv(input_path, output_path, model_path, summary_path):
             raise FileExistsError(f"Refusing to overwrite {path}")
         path.parent.mkdir(parents=True, exist_ok=True)
     bundle = joblib.load(model_path)  # Only load a model trained locally or from a trusted source.
-    if (bundle["version"], bundle["runtime"], bundle["rules_version"]) != (MODEL_VERSION, RUNTIME, rules.VERSION):
+    if (bundle["version"], bundle["runtime"], bundle["rules_version"]) != (
+            MODEL_VERSION, RUNTIME, rules.DESCRIPTION_RULES_VERSION):
         raise ValueError("Model version or dependencies differ. Use the training environment or retrain.")
     counts, types, suggestions, flags = (Counter() for _ in range(4))
     with ExitStack() as stack, read_csv(input_path, INPUT_FIELDS) as (fields, records):

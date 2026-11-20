@@ -16,7 +16,7 @@ import unittest
 from datetime import datetime, timezone
 from pathlib import Path
 
-from classify_adu import VERSION, process
+from classify_adu import DESCRIPTION_RULES_VERSION, VERSION, process
 from verify_output import VerificationError, verify
 
 ROOT = Path(__file__).resolve().parent
@@ -89,7 +89,8 @@ def main(argv=None):
             with tempfile.TemporaryDirectory(prefix="adu-check-") as directory:
                 temporary = Path(directory)
                 output, audit, stats = [temporary / name for name in ("output.csv.gz", "audit.csv.gz", "summary.json")]
-                process(source, output, audit, stats)
+                process(source, output, audit, stats,
+                        description_only=summary["classifier_version"] == DESCRIPTION_RULES_VERSION)
                 fresh = verify(source, output, stats, audit, reclassify=True)
                 if csv_content_hash(output) != csv_content_hash(args.output):
                     raise VerificationError("Fresh CSV content differs from delivered output")

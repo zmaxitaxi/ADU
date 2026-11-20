@@ -1,16 +1,16 @@
 # ADU permit classifier
 
-Classify accessory dwelling unit (ADU) permits with the September-trained model
-or the description-based rules. The rule mode appends exactly three columns
+Classify accessory dwelling unit (ADU) permits with title-aware rules or the
+September-trained model. The default rule mode appends exactly three columns
 while preserving every original cell, identifier, and row position:
 
 | Column | Values |
 | --- | --- |
-| ADU project | Yes or No |
-| ADU type | Attached, Detached, or Unclear for Yes; blank for No |
-| ADU action | Current permit purpose, possibly several actions separated by `; `; blank for No |
+| ADU project | Yes, No, or Review |
+| ADU type | Attached, Detached, or Unclear for Yes. Blank for No and Review. |
+| ADU action | Current permit purpose for Yes. Multiple actions are separated by `; `. Blank for No and Review. |
 
-Rule version: **1.2.0**. Rule mode uses the standard library on **Python 3.9 or
+Rule version **1.3.0**. Rule mode uses the standard library on **Python 3.9 or
 later**. Model mode uses the dependencies below.
 
 ## Quick start
@@ -21,9 +21,9 @@ cd ADU
 python3 run_checks.py --unit-only
 ```
 
-Bring your own CSV or gzip CSV containing a `DESCRIPTION` column. Input fields
-are copied as strings, preserving leading zeros. Use new output paths; existing
-files are protected from overwrite.
+Bring a CSV or gzip CSV containing a `DESCRIPTION` column. Rule mode also uses
+`PROJECTNAME`, `TYPE`, and `SUBTYPE` when present. Input fields are copied as
+strings, preserving leading zeros. Use new output paths to protect existing files.
 
 ```sh
 mkdir -p deliverables
@@ -38,6 +38,7 @@ The evidence sidecar contains one row per permit with labels, normalized evidenc
 reasons, and review flags. Its `source_row` is the CSV record number including
 the header, not a physical line number for multiline descriptions. The summary
 records counts, source profiles, classifier version, and SHA-256 hashes.
+Pass `--description-only` to reproduce the version 1.2.0 rule export.
 
 Source datasets, labeled exports, review samples, generated reports, and PDFs
 are excluded from Git and are not downloadable here. Software tests use embedded
@@ -45,7 +46,7 @@ fixtures and temporary files.
 
 ## September-trained model
 
-Use model mode for batch ADU detection. The September run selected regularized
+Use `--model` to run the trained classifier for comparison. The September run selected regularized
 logistic regression with description and project-name text, permit type and
 subtype, and signals from the existing rules. Training groups related records
 before splitting and chooses features and score cutoffs on validation data.
@@ -81,7 +82,8 @@ weights. Keep the key separate while reviewers label the sheet.
 
 ## Classification policy
 
-In rule mode, `DESCRIPTION` supplies the label evidence.
+The default rules check `DESCRIPTION` first and use `PROJECTNAME` if the
+description does not establish ADU involvement.
 
 **Yes** requires affirmative ADU involvement. New construction, conversion,
 legalization, demolition, repairs, utilities, and direct ancillary or
@@ -91,16 +93,19 @@ variants, and compact measurements. DADU means detached ADU. In-law
 units/quarters, granny flats, secondary dwellings/units, and second dwellings
 are provisional aliases flagged for review.
 
-**No** means no affirmative evidence under the rules. Explicit removal from
-current scope overrides historical scope. Generic eligibility boilerplate,
+**No** means the text and permit categories have no affirmative ADU match.
+Within a field, explicit removal from current scope overrides historical scope. Generic eligibility boilerplate,
 shared-plan identifiers alone, and passing ADU references under separate permits
 are excluded. Direct work such as grading for an ADU still counts when its
 building permit is separate. Unresolved references are flagged.
 
+**Review** applies if both text fields are empty or the only ADU match comes from
+`TYPE` or `SUBTYPE`. The audit and summary record the reason as `no_permit_text`
+or `category_only_match`.
+
 Guest houses, casitas, ordinary second units, duplexes, and garage conversions
-without recognized ADU evidence are conservatively No and flagged. Blank
-descriptions are also No, with a `missing_description` flag. These labels are
-not verified negative examples or proof an ADU is absent.
+without recognized ADU evidence can receive an advisory flag for ambiguous
+wording. Attachment type uses the text field that supplied the Yes decision.
 
 **Attached/Detached** refers to the primary dwelling. Explicit unit adjectives,
 conversion of an attached/detached garage, and stated connection to the primary
@@ -114,11 +119,10 @@ mean separate units. Complex descriptions may require human adjudication.
 
 ## ADU action
 
-Version 1.2.0 adds purpose classification without changing the prior project/type
-rules. Actions describe this permit's ADU work, rather than every activity in a
-related building project. Categories are New construction, Conversion, Addition,
+Version 1.2.0 added purpose classification. Actions use the description to
+identify the current permit's ADU work. Categories are New construction, Conversion, Addition,
 Legalization, Repair/remodel, Demolition/removal, Reconstruction, Utility work,
-Site preparation, Administrative, and Unclear. Projects labeled No have blank action.
+Site preparation, Administrative, and Unclear. Projects labeled No or Review have blank action.
 
 Several explicitly supported purposes remain in canonical order, for example
 `Conversion; Addition` or `Demolition/removal; Reconstruction`. The summary's
@@ -221,19 +225,19 @@ exports and source fields `ATTOMID`, `DESCRIPTION`, `TYPE`, `SUBTYPE`,
 `PROJECTNAME`. Broad metadata categories may mention ADU alongside unrelated
 work; candidates are not confirmed ADUs.
 
-The September source contained 73,587 rows. Project/type labels remain 2,864 Yes and
+The version 1.2.0 September export contained 73,587 rows. Its project labels were 2,864 Yes and
 70,723 No; Yes types are 404 Attached, 924 Detached, and 1,536 Unclear. Full local
 checks preserved 2,869,893 original cells and reproduced CSV/audit content. Two
 passing-reference records changed from the original export. There were 3,912
 blank descriptions and 520 metadata candidates among No labels.
 
-Current version 1.2.0 adds ADU action for all positive permits and blank action
+Version 1.2.0 added ADU action for all positive permits and blank action
 for No. The local original download became unavailable. We recovered its 39
 original string columns from the unchanged, checksum-verified v1.1 gzip export,
 recorded recovery provenance and compare every prior column/label with v1.2.
 The new export has 42 columns. Historical two-column exports remain available
-locally, and the prior Git commit preserves their code. Use version 1.2 inputs
-and outputs with the updated three-column validator.
+locally, and the prior Git commit preserves their code. The three-column
+validator reproduces both version 1.2.0 and version 1.3.0 exports.
 
 The source includes mixed permit stages and effective dates through September 23;
 it does not establish an exclusively approved or complete-month cohort. There

@@ -11,7 +11,7 @@ import random
 import re
 from pathlib import Path
 
-from classify_adu import VERSION, classify_description, normalize, open_csv, sha256
+from classify_adu import DESCRIPTION_RULES_VERSION, classify_description, normalize, open_csv, sha256
 
 ROOT = Path(__file__).resolve().parent
 METADATA_ADU = re.compile(r"\b(?:j?adus?|access(?:ory|ary) dwelling)\b", re.I)
@@ -77,7 +77,7 @@ def prepare(source, directory, per_group=20, seed=20261009):
         writer.writerow(["BUILDINGPERMITID", "stratum", "ADU project", "ADU type"])
         for name, row, result in chosen:
             writer.writerow([row["BUILDINGPERMITID"], name, result.project, result.unit_type])
-    manifest = {"seed": seed, "classifier_version": VERSION, "source_sha256": sha256(source),
+    manifest = {"seed": seed, "classifier_version": DESCRIPTION_RULES_VERSION, "source_sha256": sha256(source),
         "sample_size": len(chosen), "requested_per_group": per_group,
         "sampled_records_by_stratum": {name: sum(group == name for group, _, _ in chosen) for name in groups},
         "eligible_records_by_stratum": {name: len(rows) for name, rows in groups.items()},

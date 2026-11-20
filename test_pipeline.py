@@ -7,6 +7,7 @@ import unittest
 from pathlib import Path
 
 from classify_adu import classify_description, process, sha256
+from verify_output import verify
 
 
 class PipelineTests(unittest.TestCase):
@@ -15,11 +16,19 @@ class PipelineTests(unittest.TestCase):
             root = Path(directory)
             source, output, audit, summary = [root / name for name in
                 ("input.csv.gz", "output.csv.gz", "audit.csv.gz", "summary.json")]
-            fields = ["BUILDINGPERMITID", "DESCRIPTION", "ZIP", "STATUS", "EFFECTIVEDATE"]
+            fields = ["BUILDINGPERMITID", "DESCRIPTION", "ZIP", "STATUS", "EFFECTIVEDATE",
+                      "PROJECTNAME", "TYPE", "SUBTYPE"]
             rows = [
-                ["001", 'New detached ADU, café\n"rear unit"', "01234", "applied", "2026-09-01"],
-                ["002", "HVAC replacement", "00123", "issued", "2026-09-02"],
-                ["003", "", "00001", "canceled", "2026-09-03"],
+                ["001", 'New detached ADU, café\n"rear unit"', "01234", "applied", "2026-09-01",
+                 "New attached ADU", "", ""],
+                ["002", "HVAC replacement", "00123", "issued", "2026-09-02",
+                 "", "Mechanical", "Residential"],
+                ["003", " \t", "00001", "canceled", "2026-09-03", " ", "ADU permit", ""],
+                ["004", "Install a new sewer connection.", "", "", "",
+                 "Sewer connection for a detached accessory dwelling unit (ADU)", "Sewer permit", "Residential"],
+                ["005", "Bathroom remodel", "", "", "", "", "Residential ADU alterations", ""],
+                ["006", "Re-roof", "", "", "", "", "Residential", "ADU work"],
+                ["007", "", "", "", "", "Kitchen remodel", "", ""],
             ]
             with gzip.open(source, "wt", encoding="utf-8", newline="") as stream:
                 writer = csv.writer(stream)
@@ -32,10 +41,21 @@ class PipelineTests(unittest.TestCase):
             self.assertEqual(saved[0], fields + ["ADU project", "ADU type", "ADU action"])
             self.assertEqual([row[:-3] for row in saved[1:]], rows)
             self.assertEqual([row[-3:] for row in saved[1:]],
-                             [["Yes", "Detached", "Unclear"], ["No", "", ""], ["No", "", ""]])
+                             [["Yes", "Detached", "Unclear"], ["No", "", ""], ["Review", "", ""],
+                              ["Yes", "Detached", "Unclear"], ["Review", "", ""], ["Review", "", ""], ["No", "", ""]])
+            with gzip.open(audit, "rt", encoding="utf-8", newline="") as stream:
+                evidence = {row["BUILDINGPERMITID"]: row for row in csv.DictReader(stream)}
+            self.assertIn("no_permit_text", evidence["003"]["review_flags"])
+            self.assertNotIn("category_only_match", evidence["003"]["review_flags"])
+            self.assertTrue(evidence["004"]["reason"].startswith("Project title:"))
+            for permit, field in (("005", "TYPE"), ("006", "SUBTYPE")):
+                self.assertIn("category_only_match", evidence[permit]["review_flags"])
+                self.assertEqual(evidence[permit]["reason"], f"ADU evidence only in {field}")
             self.assertEqual(sha256(source), before)
-            self.assertEqual(result["rows"], 3)
-            self.assertEqual(json.loads(summary.read_text())["missing_descriptions"], 1)
+            self.assertEqual(result["project_labels"], {"Yes": 2, "No": 2, "Review": 3})
+            self.assertEqual(json.loads(summary.read_text())["missing_descriptions"], 2)
+            self.assertEqual(verify(source, output, summary, audit, reclassify=True)["rows_checked"], len(rows))
+
 
     def test_existing_output_is_not_overwritten(self):
         with tempfile.TemporaryDirectory() as directory:

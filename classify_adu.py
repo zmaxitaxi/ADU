@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Description-only, deterministic ADU permit classifier. Python 3.9+, stdlib.
+"""Deterministic ADU permit classification with title and category evidence.
 
 No text is executed and no external model or service is called. Original fields
 are copied as strings. See README.md for the classification policy and limits.
@@ -20,7 +20,8 @@ from contextlib import ExitStack
 from dataclasses import dataclass
 from pathlib import Path
 
-VERSION = "1.2.0"
+DESCRIPTION_RULES_VERSION = "1.2.0"
+VERSION = "1.3.0"
 LABEL_FIELDS = ["ADU project", "ADU type", "ADU action"]
 ACTION_CATEGORIES = ("New construction", "Conversion", "Addition", "Legalization",
     "Repair/remodel", "Demolition/removal", "Reconstruction", "Utility work",
@@ -174,6 +175,31 @@ def classify_description(description: str | None) -> Classification:
     return Classification("Yes",unit_type,reason,tuple(dict.fromkeys([m.group() for m,_ in active]+evidence)),tuple(dict.fromkeys(flags)))
 
 
+def classify_permit(row):
+    """Use permit text for automatic labels and category matches for review."""
+    description = classify_description(row["DESCRIPTION"])
+    if description.project == "Yes":
+        return description
+
+    title_text = row.get("PROJECTNAME")
+    if normalize(title_text):
+        title = classify_description(title_text)
+        if title.project == "Yes":
+            flags = tuple(dict.fromkeys(description.flags + title.flags))
+            return Classification("Yes", title.unit_type, f"Project title: {title.reason}", title.evidence, flags)
+    elif "missing_description" in description.flags:
+        return Classification("Review", "", "Missing permit description and project title",
+                              flags=description.flags + ("no_permit_text",))
+
+    matched_categories = [field for field in ("TYPE", "SUBTYPE")
+                          if classify_description(row.get(field)).project == "Yes"]
+    if matched_categories:
+        evidence = tuple(normalize(row[field]) for field in matched_categories)
+        return Classification("Review", "", f"ADU evidence only in {', '.join(matched_categories)}",
+                              evidence, description.flags + ("category_only_match",))
+    return description
+
+
 @dataclass(frozen=True)
 class ActionClassification:
     label: str
@@ -264,8 +290,8 @@ def classify_action(description, project=None):
     """Current permit purpose only. Several explicit actions retain separate tags."""
     if project is None:
         project = classify_description(description).project
-    if project == "No":
-        return ActionClassification("", "Not applicable to a No project")
+    if project != "Yes":
+        return ActionClassification("", f"Not applicable to a {project} project")
     text = BOILERPLATE.sub("generic eligibility", PASSING_REFERENCE.sub("separate permit reference", normalize(description)))
     text = rx(r"\b(?:sq\.?\s*ft\.?|s\.f\.|sf\.)").sub("sf", text)
     text = rx(r"\b\d+\s*[- ]?\s*(?:bedrooms?|beds?|bd|bathrooms?|baths?|ba)\b").sub("unit feature", text)
@@ -375,7 +401,7 @@ def sha256(path):
         for block in iter(lambda:f.read(1024*1024),b""):digest.update(block)
     return digest.hexdigest()
 
-def process(input_path, output_path, audit_path, summary_path):
+def process(input_path, output_path, audit_path, summary_path, *, description_only=False):
     paths = [Path(x).resolve() for x in (input_path, output_path, audit_path, summary_path)]
     if len(set(paths)) != 4:
         raise ValueError("Input, output, audit and summary must be distinct files")
@@ -416,7 +442,7 @@ def process(input_path, output_path, audit_path, summary_path):
             for row_number, row in enumerate(reader, 2):
                 if None in row or any(value is None for value in row.values()):
                     raise ValueError(f"Malformed CSV record {row_number}")
-                result = classify_description(row["DESCRIPTION"])
+                result = classify_description(row["DESCRIPTION"]) if description_only else classify_permit(row)
                 action = classify_action(row["DESCRIPTION"], result.project)
                 writer.writerow({**row, "ADU project": result.project, "ADU type": result.unit_type, "ADU action": action.label})
                 audit_writer.writerow({"source_row": row_number, "BUILDINGPERMITID": row.get("BUILDINGPERMITID", ""),
@@ -441,7 +467,8 @@ def process(input_path, output_path, audit_path, summary_path):
                     ids.add(identifier)
         nonempty_dates = [date for date in dates if date]
         summary = {
-            "classifier_version": VERSION, "input_path": str(paths[0]), "input_sha256": sha256(paths[0]),
+            "classifier_version": DESCRIPTION_RULES_VERSION if description_only else VERSION,
+            "input_path": str(paths[0]), "input_sha256": sha256(paths[0]),
             "output_path": str(paths[1]), "output_sha256": sha256(staged[0]), "rows": rows,
             "original_columns": len(fields), "output_columns": len(fields) + 3,
             "project_labels": dict(counts), "adu_types": dict(types), "missing_descriptions": missing,
@@ -451,7 +478,9 @@ def process(input_path, output_path, audit_path, summary_path):
             "effective_date_range": [min(nonempty_dates), max(nonempty_dates)] if nonempty_dates else [None, None],
             "effective_dates": dict(sorted(dates.items())), "statuses": dict(statuses.most_common()),
             "review_flags": dict(flags), "limitations": [
-                "Description evidence only; No does not establish physical absence of an ADU.",
+                ("Description evidence only; No does not establish physical absence of an ADU."
+                 if description_only else "Automatic ADU decisions use the description and project title. "
+                 "Category-only matches or permits without usable text are flagged for review."),
                 "Counts refer to permit records, not unique ADU units or properties.",
                 "Mixed statuses and partial-month coverage retained; no approval filter applied.",
                 "Rule-based labels are provisional; accuracy requires independently adjudicated data."]}
@@ -474,7 +503,9 @@ def main():
     parser.add_argument("input",type=Path);parser.add_argument("output",type=Path)
     parser.add_argument("--audit", type=Path, help="Rule classifier evidence CSV")
     parser.add_argument("--summary", type=Path, required=True)
-    parser.add_argument("--model", type=Path, help="Locally trained ADU model from adu_ml.py train")
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--model", type=Path, help="Locally trained ADU model from adu_ml.py train")
+    mode.add_argument("--description-only", action="store_true", help="Reproduce version 1.2 rule labels")
     args=parser.parse_args()
     if args.model:
         if args.audit:
@@ -492,7 +523,7 @@ def main():
     if not args.audit:
         parser.error("--audit is required in rule mode")
     try:
-        summary=process(args.input,args.output,args.audit,args.summary)
+        summary = process(args.input, args.output, args.audit, args.summary, description_only=args.description_only)
     except (ValueError, OSError, csv.Error, EOFError) as error:
         parser.exit(2, f"error: {error}\n")
     print(json.dumps({k:summary[k] for k in ("rows","project_labels","adu_types","adu_actions","missing_descriptions","review_flags")},indent=2))

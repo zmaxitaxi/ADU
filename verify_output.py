@@ -11,8 +11,9 @@ import json
 from contextlib import ExitStack
 from pathlib import Path
 
-from classify_adu import (ACTION_CATEGORIES, LABEL_FIELDS, action_components,
-                          classify_action, classify_description, open_csv, sha256)
+from classify_adu import (ACTION_CATEGORIES, DESCRIPTION_RULES_VERSION, LABEL_FIELDS, VERSION,
+                          action_components, classify_action, classify_description, classify_permit,
+                          open_csv, sha256)
 
 AUDIT_FIELDS = ["source_row", "BUILDINGPERMITID", "DESCRIPTION", "ADU project",
                 "ADU type", "reason", "evidence", "review_flags", "ADU action",
@@ -31,6 +32,10 @@ def require(condition, message):
 def verify(source_path, output_path, summary_path, audit_path=None, reclassify=False):
     summary = json.loads(Path(summary_path).read_text(encoding="utf-8"))
     require(isinstance(summary, dict), "Summary must be a JSON object")
+    version = summary.get("classifier_version")
+    require(version in (DESCRIPTION_RULES_VERSION, VERSION), "Unsupported classifier version")
+    description_only = version == DESCRIPTION_RULES_VERSION
+    project_labels = {"Yes", "No"} if description_only else {"Yes", "No", "Review"}
     counts, types, flags = collections.Counter(), collections.Counter(), collections.Counter()
     actions, components, action_flags = collections.Counter(), collections.Counter(), collections.Counter()
     statuses, dates, states = collections.Counter(), collections.Counter(), collections.Counter()
@@ -55,7 +60,7 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
             require(len(after) == len(fields) + 3, f"Malformed output record {number}")
             require(after[:-3] == before, f"Original cells or order differ at record {number}")
             project, unit_type, action_label = after[-3:]
-            require(project in {"Yes", "No"}, f"Invalid project label at record {number}")
+            require(project in project_labels, f"Invalid project label at record {number}")
             allowed_types = {"Attached", "Detached", "Unclear"} if project == "Yes" else {""}
             require(unit_type in allowed_types, f"Invalid type at record {number}")
             try:
@@ -64,8 +69,10 @@ def verify(source_path, output_path, summary_path, audit_path=None, reclassify=F
                 raise VerificationError(f"Invalid action at record {number}") from None
             require(bool(parts) if project == "Yes" else not action_label, f"Invalid action at record {number}")
             record = dict(zip(fields, before))
-            result = classify_description(record["DESCRIPTION"]) if reclassify else None
-            action = classify_action(record["DESCRIPTION"], project) if reclassify else None
+            result = action = None
+            if reclassify:
+                result = classify_description(record["DESCRIPTION"]) if description_only else classify_permit(record)
+                action = classify_action(record["DESCRIPTION"], result.project)
             if result is not None:
                 require((project, unit_type) == (result.project, result.unit_type),
                         f"Saved labels differ from classifier at record {number}")
