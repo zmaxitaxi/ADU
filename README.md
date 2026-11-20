@@ -1,9 +1,8 @@
 # ADU permit classifier
 
-Identify accessory dwelling unit (ADU) projects from building-permit descriptions
-and classify their relationship to the primary dwelling and permit purpose. The Python pipeline
-appends exactly three columns while preserving every original cell, identifier,
-and row position:
+Classify accessory dwelling unit (ADU) permits with the September-trained model
+or the description-based rules. The rule mode appends exactly three columns
+while preserving every original cell, identifier, and row position:
 
 | Column | Values |
 | --- | --- |
@@ -11,8 +10,8 @@ and row position:
 | ADU type | Attached, Detached, or Unclear for Yes; blank for No |
 | ADU action | Current permit purpose, possibly several actions separated by `; `; blank for No |
 
-Current version: **1.2.0**. Requires **Python 3.9 or later**, standard library
-only. Permit text is treated as data and never executed.
+Rule version: **1.2.0**. Rule mode uses the standard library on **Python 3.9 or
+later**. Model mode uses the dependencies below.
 
 ## Quick start
 
@@ -44,10 +43,45 @@ Source datasets, labeled exports, review samples, generated reports, and PDFs
 are excluded from Git and are not downloadable here. Software tests use embedded
 fixtures and temporary files.
 
+## September-trained model
+
+Use model mode for batch ADU detection. The September run selected regularized
+logistic regression with description and project-name text, permit type and
+subtype, and signals from the existing rules. Training groups related records
+before splitting and chooses features and score cutoffs on validation data.
+The run directory contains the model, split manifest, and held-out comparison
+with the rules and a supervised model without rule features.
+
+```sh
+python3.12 -m venv .venv
+.venv/bin/python -m pip install -r requirements-ml.txt
+.venv/bin/python adu_ml.py train data/task1_dataset_2026-09_3labels.csv deliverables/adu_model
+.venv/bin/python classify_adu.py INPUT.csv.gz deliverables/model_labels.csv.gz \
+  --model deliverables/adu_model/model.joblib --summary deliverables/model_summary.json
+.venv/bin/python adu_ml.py audit deliverables/model_labels.csv.gz deliverables/model_audit
+```
+
+You can skip training if you have a trusted local model bundle from a completed
+run. Use the matching dependency versions. Training expects the three reference
+labels `adu`, `detached`, and `new_adu`. Scoring needs `BUILDINGPERMITID`,
+`DESCRIPTION`, `PROJECTNAME`, `TYPE`, and `SUBTYPE`, with a unique permit ID
+on each row. All source fields and row order are preserved.
+
+- `adu` is Yes or No for automatic calls. A blank with `ml_review_flags`
+  indicates missing text or a score that needs review.
+- `detached` is Yes, No, or Unsure for permits called ADU. Other rows have a
+  blank value.
+- `new_adu` stays blank for adjudication. `new_adu_suggestion` is a pilot
+  prediction for permits called ADU, based on the subset with explicit labels.
+
+The export also carries model scores and rule decisions for comparison. Scores
+rank permits for review. The audit command draws a stratified random sample and
+writes a blinded review sheet and a separate key with predictions and sampling
+weights. Keep the key separate while reviewers label the sheet.
+
 ## Classification policy
 
-Only `DESCRIPTION` supplies label evidence. `TYPE`, `SUBTYPE`, `PROJECTNAME`,
-`STATUS`, and property identifiers do not override the labels.
+In rule mode, `DESCRIPTION` supplies the label evidence.
 
 **Yes** requires affirmative ADU involvement. New construction, conversion,
 legalization, demolition, repairs, utilities, and direct ancillary or

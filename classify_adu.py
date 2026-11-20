@@ -472,8 +472,25 @@ def process(input_path, output_path, audit_path, summary_path):
 def main():
     parser=argparse.ArgumentParser(description=__doc__)
     parser.add_argument("input",type=Path);parser.add_argument("output",type=Path)
-    parser.add_argument("--audit",type=Path,required=True);parser.add_argument("--summary",type=Path,required=True)
+    parser.add_argument("--audit", type=Path, help="Rule classifier evidence CSV")
+    parser.add_argument("--summary", type=Path, required=True)
+    parser.add_argument("--model", type=Path, help="Locally trained ADU model from adu_ml.py train")
     args=parser.parse_args()
+    if args.model:
+        if args.audit:
+            parser.error("--audit is for rule mode. Use adu_ml.py audit on model predictions.")
+        try:
+            from adu_ml import score_csv
+        except ImportError as error:
+            parser.exit(2, f"error: install requirements-ml.txt to use --model ({error})\n")
+        try:
+            summary = score_csv(args.input, args.output, args.model, args.summary)
+        except (ValueError, OSError, csv.Error, EOFError) as error:
+            parser.exit(2, f"error: {error}\n")
+        print(json.dumps(summary, indent=2))
+        return
+    if not args.audit:
+        parser.error("--audit is required in rule mode")
     try:
         summary=process(args.input,args.output,args.audit,args.summary)
     except (ValueError, OSError, csv.Error, EOFError) as error:
